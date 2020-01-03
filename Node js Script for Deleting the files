@@ -1,0 +1,25 @@
+/**
+ * Triggered from a message on a Cloud Pub/Sub topic.
+ *
+ * @param {!Object} event Event payload.
+ * @param {!Object} context Metadata for the event.
+ */
+exports.helloPubSub = (event, context) => {
+  const {Storage} = require('@google-cloud/storage');
+        const storage = new Storage();
+        const bucket = storage.bucket('salesforce_orders_integration_with_marketo');
+  		bucket.getFiles(function(err, files)
+         {
+            if (!err) 
+            {
+              	files.forEach(file => 
+               {
+                  var filename = file.name;
+                  console.log(filename+' is deleted');
+ 
+                  storage.bucket('salesforce_orders_integration_with_marketo').file(filename).delete();
+                });
+            }
+           
+		});
+};
