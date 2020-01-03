@@ -1,0 +1,156 @@
+/**
+ * Triggered from a message on a Cloud Pub/Sub topic.
+ *
+ * @param {!Object} event Event payload.
+ * @param {!Object} context Metadata for the event.
+ */
+exports.helloPubSub = (event, context) => {
+const axios = require('axios'); //axois library used for Http methods like GET,POST,PUT Etc.
+var Salesforce_String_Data;  // Salesforce Order's Data in String Format.
+var jsonexport = require('jsonexport'); // jsonexport are used for convert json data into csv format.
+const {Storage} = require('@google-cloud/storage'); // Google cloud library for save the data.
+const storage = new Storage();   // Instance of Google cloud Storage.
+const myBucket = storage.bucket('salesforce_orders_integration_with_marketo'); // Bucket Name.
+var d = new Date();   // Insatance of Data method.
+    year = d.getUTCFullYear();
+    month = ("0"+(d.getUTCMonth()+1)).slice(-2);
+    day = ("0"+d.getUTCDate()).slice(-2);
+    hour = ("0"+d.getUTCHours()).slice(-2);
+    minute = ("0"+d.getUTCMinutes()).slice(-2);
+    second = ("0"+d.getUTCSeconds()).slice(-2);
+    endDate = year+'-'+month+'-'+day+'T'+hour+':'+minute+':'+second+'Z'
+    if (minute>=1)
+    {
+      minute = minute-1;
+      if(minute <10)
+      {
+        minute = "0"+minute;
+      }
+     
+    }
+    else {
+      minute = (parseInt(minute) + 60) - 1;
+      if(hour!='00')
+      {
+        hour = hour - 1;
+        if(hour <10)
+        {
+          hour = "0"+hour;
+        }
+      }
+    }
+    var startDate = year+'-'+month+'-'+day+'T'+hour+':'+minute+':'+second+'Z';  // DateTime before 3 Minutes
+   // console.log(startDate +'     '+endDate);
+const file = myBucket.file('New Orders file_'+endDate+'  Data.csv');
+var Str_Object;   //To trim order data receiving from SF.
+var Salesforce_final_Order_Data;  // SF Json order's Data that is insert in Marketo.
+var Salesforce_Token;    //Salesforce Access token for Access the Data.
+var Marketo_Token;    //Marketo Access token
+var csvArrayData; // CSV File data to save 
+class SalesForceMarketoConnector //Class for Getting-- the Record from Salesforce and Insert them into Marketo Cloud.
+    {
+        constructor() // Class Constructor.
+            {
+                //Post Method call for getting Salesforce Access Token.
+                axios.post(`${'https://orderassurance.my.salesforce.com'}/services/oauth2/token?grant_type=password
+                &client_id=${encodeURIComponent('3MVG9JZ_r.QzrS7gkZb9agjgVsKnMab3lD6r9T93B1o_R8FANdNfR2WFfGBJIOV7TUs0Rr4r6y02Usu0.aUA.')}
+                &client_secret=${encodeURIComponent('6E66AF748DA7710F24358629C1315BE8AE4C8475DF9DAB777208546C327D1A4E')}
+                &username=${encodeURIComponent('firstenergyhome@ibex.digital')}
+                &password=${encodeURIComponent('1stEnergy!q9t364XJwBkywzBavNee6Unbp')}`)
+                .then(response => {
+                Salesforce_Token = response.data.access_token;
+                //Access the Data of Orders from Salesforce using Access token.
+                let config = {headers: {
+                'Authorization': 'Bearer ' + Salesforce_Token
+                }};
+                 //Salesforce SOQL query 
+                var payload = 'SELECT+Client_c__c,+TFN__c,+LastModifiedDate,+Order_Source__c,+OCN__c,+Email__c,+First_Name__c,+Last_Name__c,+BTN__c,+Address__c,+Zip__c,+City__c,+State__c,+Agent_ID__c,+Offer_Name__c,+OfferRGU__c,+ACTIVATED_Internet_RGU__c,+ACTIVATED_Voice_RGU__c,+Internet_RGU_Activity_Date__c,+Video_RGU_Activity_Date__c,+Video_RGU_Status__c,+Video_Commission_Status__c,+Internet_RGU_Installation_Date__c,+Internet_Commission_Status__c,+Security_RGU_Installation_Date__c,+Security_RGU_Activity_Date__c,+Security_Commission_Status__c,+Account_Number__c+from+Order__c+WHERE+LastModifiedDate +<'+endDate+'and+LastModifiedDate +>'+startDate;
+                 //Get Method for Access SF Orders Data in every 15 Minutes.
+                axios.get('https://orderassurance.my.salesforce.com/services/data/v20.0/query/?q='+payload, config)
+                    .then(response =>{
+                        var Salesforce_Orders_data = JSON.stringify(response.data);  
+                        Str_Object = Salesforce_Orders_data.substring(Salesforce_Orders_data.indexOf("["));
+                        Salesforce_String_Data = Str_Object.split(']')[0] ;
+                        Salesforce_String_Data = Salesforce_String_Data+']';
+                        var Salesforce_Data_Json=JSON.parse(Salesforce_String_Data)
+                        console.log(Salesforce_Data_Json);
+                        if(Salesforce_Data_Json.length == 0)
+                        {return;}
+                        var Salesforce_data = {};
+                        Salesforce_data.input = []
+                        for (var i = 0; i <Salesforce_Data_Json.length; i++) //Mapping the Orders Data of Salesforce to Marketo Orders.
+                            {
+                        		 if(Salesforce_Data_Json[i].Email__c != null)
+                                 {
+                                    Salesforce_data.input.push({bTN:Salesforce_Data_Json[i].BTN__c,agentID:Salesforce_Data_Json[i].Agent_ID__c,
+                                    //affiliate:Salesforce_Data_Json[i].Affiliate__c,
+                                    client:Salesforce_Data_Json[i].Client_c__c,
+                                    city:Salesforce_Data_Json[i].City__c,email:Salesforce_Data_Json[i].Email__c,
+                                    firstName:Salesforce_Data_Json[i].First_Name__c,internetRGU:Salesforce_Data_Json[i].ACTIVATED_Internet_RGU__c,
+                                    lastName:Salesforce_Data_Json[i].Last_Name__c,oCN:Salesforce_Data_Json[i].OCN__c,
+                                    offerName:Salesforce_Data_Json[i].Offer_Name__c,offerRGU:Salesforce_Data_Json[i].OfferRGU__c,
+                                    source:Salesforce_Data_Json[i].Order_Source__c,state:Salesforce_Data_Json[i].State__c,
+                                    tFN:Salesforce_Data_Json[i].TFN__c,voiceRGU:Salesforce_Data_Json[i].ACTIVATED_Voice_RGU__c,
+                                    zip:Salesforce_Data_Json[i].Zip__c,personEmail:'dan@macromator.com'/*Salesforce_Data_Json[i].Email__c*/,
+                                    internet_Activity_Date:Salesforce_Data_Json[i].Internet_RGU_Activity_Date__c,video_Activity_Date:Salesforce_Data_Json[i].Video_RGU_Activity_Date__c,
+                                    video_Activity_Status:Salesforce_Data_Json[i].Video_RGU_Status__c,video_Commission_Status:Salesforce_Data_Json[i].Video_Commission_Status__c,
+                                    internet_Installation_Date:Salesforce_Data_Json[i].Internet_RGU_Installation_Date__c,internet_Commission_Status:Salesforce_Data_Json[i].Internet_Commission_Status__c,
+                                    security_Installation_Date:Salesforce_Data_Json[i].Security_RGU_Installation_Date__c,security_Activity_Date:Salesforce_Data_Json[i].Security_RGU_Activity_Date__c,
+                                    security_Commission_Status:Salesforce_Data_Json[i].Security_Commission_Status__c,account_number:Salesforce_Data_Json[i].Account_Number__c,
+                                    address:Salesforce_Data_Json[i].Address__c});
+                                 }
+                            }
+                               
+                                var New_Json_Data = JSON.stringify(Salesforce_data);
+                                Salesforce_final_Order_Data = JSON.parse(New_Json_Data);
+                  				console.log('Salesforce_final_Order_Data',Salesforce_final_Order_Data);
+                 				if(Salesforce_final_Order_Data.input.length == 0)
+                                {return;}
+                                //Convert Json Data to CSV 
+                                jsonexport(Salesforce_Data_Json,function(err, csv){
+                                    if(err) return console.log(err);
+                                    csvArrayData = csv;      
+                                    console.log(csvArrayData);
+                                    });
+                                //File are save in Google Cloud Bucket.
+                                file.save(csvArrayData, function(err) {
+                                    if (!err) {
+                                        console.log('File written successfully.');
+                                            }   
+                                        });    
+                                //Get method for Access the Marketo Access Token
+                                axios.get('https://660-ZGH-703.mktorest.com/identity/oauth/token?grant_type=client_credentials&client_id=4d42fecd-2228-422b-8686-4abd9ac95aff&client_secret=bQ0m8NiRlCwvfC7SUJV9zEgmSeZB4K7D')
+                                .then(response => {
+                                        Marketo_Token = response.data.access_token;
+                                        //Access the Data of Orders from Salesforce using Access token.
+                                        let config = {headers: {
+                                        'Authorization': 'Bearer ' + Marketo_Token
+                                        }};
+                                  console.log('Marketo_Token ',Marketo_Token);
+                                  console.log('Salesforce_final_Order_Data',Salesforce_final_Order_Data);
+
+                                        //Insert the Data of Orders from Salesforce to Marketo using Access token.
+                                        axios.post('https://660-ZGH-703.mktorest.com/rest/v1/customobjects/orders_c.json?content-type=application/json&access_token='+Marketo_Token,Salesforce_final_Order_Data)
+                                        .then(response => console.log("Orders Inserted ", response.data))               
+                                        .catch(err => {
+                                        console.log('ERROR: ' + err.message); 
+                                        console.error(err);
+                                        });
+                                    })
+                            })
+                            
+                            .catch(err => {
+                                console.log('ERROR ' + err.message); 
+                                console.error(err);
+                            });
+                            return { result: 'ok'}
+                        }) // catch methode to check Successfully Access Salesforce Token. 
+                        .catch(err => {
+                        console.log('Error getting Salesforce token: ' + err.message);
+                        console.error(err);
+                        });
+                }                                  
+    }
+    //Class call method.
+    module.exports = new SalesForceMarketoConnector(); 
+};
